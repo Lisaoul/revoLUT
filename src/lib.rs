@@ -9,7 +9,7 @@ use num_complex::Complex;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
-use std::{fs, io};
+use std::{cmp, fs, io};
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -26,7 +26,7 @@ use tfhe::core_crypto::entities::FourierPolynomial;
 use tfhe::core_crypto::fft_impl::fft64::math::fft::FftView;
 
 use rand::Rng;
-
+mod blind_short_path;
 mod blind_sort;
 mod blind_topk;
 pub mod lut;
@@ -1134,45 +1134,73 @@ impl PublicKey {
         column: &LWE,
         ctx: &Context,
     ) -> LWE {
-        // multi blind array access
-        let vec_of_lwe: Vec<LWE> = matrix
-            .into_par_iter()
+        let extract_vec= self.blind_extract_vec(matrix, column, ctx);
+
+        // final blind array access
+        self.blind_array_access(&line, &extract_vec, ctx)
+    }
+
+   //extract colomn  from matrix
+    pub fn blind_extract_vec(&self, matrix: &[LUT], 
+        column: &LWE,
+        ctx: &Context
+    
+    ) -> LUT {
+            let vec_of_lwe: Vec<LWE> = matrix.into_par_iter()
             .map(|lut| self.blind_array_access(column, lut, ctx))
             .collect();
 
-        // pack all the lwe
-        let accumulator_final = LUT::from_vec_of_lwe(&vec_of_lwe, self, &ctx);
-
-        // final blind array access
-        self.blind_array_access(&line, &accumulator_final, ctx)
+          // pack all the lwe
+            let accumulator_final = LUT::from_vec_of_lwe(&vec_of_lwe, self, &ctx);
+            
+      accumulator_final
+        
     }
 
-    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
-    /// time: 2BR + pKS
-    pub fn blind_matrix_access_clear(
-        &self,
+
+  //extract colomn from clear matrix 
+    pub fn blind_extract_vec_clear(&self,
         matrix: &Vec<Vec<u64>>,
-        x: &LWE,
-        y: &LWE,
-        ctx: &Context,
-    ) -> LWE {
+        column: &LWE,
+        ctx: &Context,) -> LUT {
         let p = ctx.full_message_modulus;
         let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
-        self.blind_rotation_assign(&self.neg_lwe(&y, &ctx), &mut lut, ctx);
+        self.blind_rotation_assign(&self.neg_lwe(&column, &ctx), &mut lut, ctx);
         let onehot = lut.to_many_lwe(&self, ctx);
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        let column = Vec::from_iter(matrix.iter().map(|line| {
-            let mut output = zero.clone();
-            for (lwe, elt) in onehot.iter().zip(line.iter()) {
-                let mut encrypted_bool = lwe.clone();
-                lwe_ciphertext_cleartext_mul_assign(&mut encrypted_bool, Cleartext(*elt));
-                lwe_ciphertext_add_assign(&mut output, &encrypted_bool);
-            }
-            output
-        }));
-        let lut = LUT::from_vec_of_lwe(&column, &self, ctx);
-        self.blind_array_access(&x, &lut, ctx)
+        let column =Vec::from_iter( matrix
+            .iter()
+            .map(|line| {
+
+                let mut output= zero.clone();
+                for (lwe,elt) in onehot.iter().zip(line.iter()) {
+                    let mut  encrypted_bool= lwe.clone();
+                    lwe_ciphertext_cleartext_mul_assign(&mut encrypted_bool, Cleartext(*elt));
+                    lwe_ciphertext_add_assign(&mut output, &encrypted_bool);
+                }
+                // //let xi = onehot[i].clone();
+                // let mut encypted_line= Vec::from_iter(onehot.iter().zip(
+                //     line.iter()).map(|(lwe,elt)| {
+                //     let mut output = lwe.clone();
+                //     lwe_ciphertext_cleartext_mul_assign(&mut output, Cleartext(*elt));
+                //     output
+                // }))
+                // let mut output = zero.clone();
+                // for encypted_value in encypted_line{
+                //     lwe_ciphertext_add_assign(&mut output, &encypted_value);
+                // }
+                // output
+                output
+            }));
+            // .fold(vec![zero; p], |mut acc, elt| -> Vec<LweCiphertext<Vec<u64>>> {
+            //     acc.iter_mut()
+            //         .zip(elt.iter())
+            //         .for_each(|(dst, src)| lwe_ciphertext_add_assign(dst, src));
+            //     acc
+            // });
+        LUT::from_vec_of_lwe(&column, &self, ctx)
     }
+
 
     pub fn blind_matrix_add(
         &self,
@@ -1190,6 +1218,20 @@ impl PublicKey {
             let x = self.lut_extract(&column_lut, i, ctx);
             self.blind_array_increment(lut, &column, &x, ctx);
         }
+    }
+
+    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
+    /// time: 2BR + pKS
+    pub fn blind_matrix_access_clear(
+        &self,
+        matrix: &Vec<Vec<u64>>,
+        x: &LWE,
+        y: &LWE,
+        ctx: &Context,
+    ) -> LWE {
+        let l= self.blind_extract_vec_clear(matrix, x, ctx);
+        
+        self.blind_array_access(&y, &l, ctx)
     }
 
     pub fn blind_matrix_set(
@@ -1382,6 +1424,19 @@ impl PublicKey {
         // let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
         // self.blind_array_access(&twice_bit, &lut, &ctx)
         self.blind_matrix_access_clear(&matrix, &a, &b, &ctx)
+    }
+
+    pub fn blind_add_infini(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
+        let n = ctx.full_message_modulus;
+        //transfor en boucle for
+        let matrix = Vec::from_iter((0..n).map(|lin| {
+            LUT::from_vec_trivially(
+                &Vec::from_iter((0..n).map(|col| cmp::min(n - 1, lin + col) as u64)),
+                ctx
+            )
+        }));
+
+        self.blind_matrix_access(&matrix, &a, &b, &ctx)
     }
 
     pub fn blind_gt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
@@ -2193,8 +2248,7 @@ impl LUTStack {
 }
 
 #[cfg(test)]
-mod test {
-    use std::array;
+mod tests {
     use std::cmp;
     use std::time::Instant;
 
@@ -3418,4 +3472,67 @@ mod test {
         println!("actual: {}", actual);
         // assert_eq!(actual, 2);
     }
+
+    #[quickcheck]
+    fn test_blind_add_infini(x: u64, y: u64) {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let p = ctx.full_message_modulus() as u64;
+
+        let a = private_key.allocate_and_encrypt_lwe(x % p, &mut ctx);
+        let b = private_key.allocate_and_encrypt_lwe(y % p, &mut ctx);
+
+        let c = public_key.blind_add_infini(&a, &b, &ctx);
+
+        let r = private_key.decrypt_lwe(&c, &ctx);
+        //
+        assert_eq!(r, cmp::min(p - 1, (x % p) + (y % p)));
+    }
+
+
+
+     #[quickcheck]
+    fn test_blind_extract_vec(xs: Vec<u64>) {
+        // setup
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let p = ctx.full_message_modulus() as u64;
+
+        // bornage pour garder le test rapide
+        let xs = &xs[..xs.len().min(16)];
+
+        // construire la "matrice" = Vec<LUT>
+        let matrix: Vec<LUT> = xs.iter().map(|&x| {
+            let lwe = private_key.allocate_and_encrypt_lwe(x % p, &mut ctx);
+            LUT::from_lwe(&lwe, public_key, &ctx)  
+        }).collect();
+
+        // colonne à interroger 
+        let column = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+
+        // appel de la fonction
+        let result_lut = public_key.blind_extract_vec(&matrix, &column, &ctx);
+
+        // déchiffrer les résultats
+        let decrypted: Vec<u64> = result_lut.to_array(private_key, &ctx);
+
+        // on compare le résultat au vecteur original (modulo p)
+        let mut expected: Vec<u64> = xs.iter().map(|x| x % p).collect();
+        expected.resize(16,0);
+        assert_eq!(decrypted, expected);
+    }
+
+  #[quickcheck]
+   
+   fn test_blind_extract_vec_clear(){
+    // setup
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let p = ctx.full_message_modulus() as u64;
+
+   }
+
 }

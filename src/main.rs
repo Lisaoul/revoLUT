@@ -17,10 +17,10 @@ pub fn generate_keys() {
     let params = [
         // PARAM_MESSAGE_2_CARRY_0,
         // PARAM_MESSAGE_3_CARRY_0,
-        // PARAM_MESSAGE_4_CARRY_0,
+        PARAM_MESSAGE_4_CARRY_0,
         // PARAM_MESSAGE_5_CARRY_0,
         // PARAM_MESSAGE_6_CARRY_0,
-        PARAM_MESSAGE_7_CARRY_0,
+        //PARAM_MESSAGE_7_CARRY_0,
         // PARAM_MESSAGE_8_CARRY_0,
     ];
     for param in params {
