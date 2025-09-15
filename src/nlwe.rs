@@ -1,6 +1,6 @@
 use std::ops::Index;
 
-use tfhe::core_crypto::prelude::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign};
+use tfhe::{boolean::public_key, core_crypto::prelude::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign}};
 
 use crate::{Context, PrivateKey, PublicKey, LUT, LWE};
 
@@ -241,6 +241,13 @@ impl NLWE {
         }
 
         out
+    }
+
+
+    pub fn negate_all_digits(&self, public_key:&PublicKey, ctx: &Context)->NLWE{
+        NLWE{
+            digits: self.digits.iter().map(|digit| public_key.neg_lwe(&digit, &ctx)).collect()
+        }
     }
 }
 

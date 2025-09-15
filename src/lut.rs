@@ -25,6 +25,8 @@ impl MNLUT {
         self.nlwes.first().map(|nlwe| nlwe.n()).unwrap_or(0)
     }
 
+
+
     pub fn from_plain(
         input: &[u64],
         m: usize,
@@ -55,6 +57,9 @@ impl MNLUT {
             .collect()
     }
 
+
+
+
     pub fn from_plain_trivially(
         input: &[u64],
         m: usize,
@@ -68,6 +73,22 @@ impl MNLUT {
                 let idx_digits = Vec::from_iter((0..m).map(|i| indices[i] as u64));
                 let idx = from_digits(&idx_digits, p) as usize;
                 NLWE::from_plain_trivially(input[idx], n, ctx, public_key)
+            }),
+        }
+    }
+
+
+    pub fn from_nlwes(input:&[NLWE],m:usize,public_key: &PublicKey, ctx:&Context)->MNLUT{
+        //convertir les vec à ndarray multi dimentional 
+         let p = ctx.full_message_modulus as u64;
+         let n=input[0].n();
+         let default_nlwe= NLWE:: from_plain_trivially(0, n, ctx, public_key);
+         Self {
+             nlwes: Array::from_shape_fn(IxDyn(&vec![p as usize; m]), |indices| {
+                 let idx_digits = Vec::from_iter((0..m).map(|i| indices[i] as u64));
+                 let idx = from_digits(&idx_digits, p) as usize;
+            //     NLWE::from_plain_trivially(input[idx], n, ctx, public_key)
+            input.iter().nth(idx).unwrap_or(&default_nlwe).clone()
             }),
         }
     }
@@ -309,7 +330,21 @@ impl MNLUT {
         }
         sorted
     }
+//rotate en m dimensions 
+    pub fn blind_rotate_assign_nlwe(&mut self, index: &NLWE, public_key: &PublicKey, ctx: &Context){
+        let m= self.m();
+        assert_eq!(m,index.n());
+        
+        for i in 0..m {
+            let mut packed_lut  = PackedMNLUT:: from_mnlut_by_dimension(&self, ctx, public_key, i);
+            packed_lut.blind_rotate_assign(&index[i], public_key, ctx);
+            *self= packed_lut.to_mnlut(ctx, public_key);
+        }
+    }
 }
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -393,7 +428,7 @@ mod tests {
         let (m, n) = (1, 2);
         let size = p.pow(m as u32);
         let range = p.pow(n as u32);
-
+        //pour fail le test mets just -1 a cotéde size
         let data = Vec::from_iter((0..size).map(|i| i % range));
         let mut lut = MNLUT::from_plain(&data, m, n, &private_key, &mut ctx);
 

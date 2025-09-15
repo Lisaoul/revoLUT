@@ -1,8 +1,8 @@
 use std::time::Instant;
 
-use crate::{lut::MNLUT, nlwe::NLWE, Context, PublicKey, LUT};
+use crate::{lut::{self, MNLUT}, nlwe::NLWE, Context, PublicKey, LUT, LWE};
 use ndarray::{Array, Dimension, IxDyn, Zip};
-use tfhe::core_crypto::{commons::utils::ZipChecked, prelude::glwe_ciphertext_add_assign};
+use tfhe::{boolean::public_key, core_crypto::{commons::utils::ZipChecked, prelude::glwe_ciphertext_add_assign}};
 
 /// Pre-packed array of LUT ciphertexts holding p^M values mod p^N
 /// last coordinate is index within LUT
@@ -14,13 +14,20 @@ pub struct PackedMNLUT {
 impl PackedMNLUT {
     pub fn from_mnlut(mnlut: &MNLUT, ctx: &Context, public_key: &PublicKey) -> Self {
         let m = mnlut.m();
+        Self::from_mnlut_by_dimension(mnlut, ctx, public_key, m-1)
+        
+    }
+// pack la mn lut dans des direction diffrentes 
+    pub fn from_mnlut_by_dimension(mnlut: &MNLUT, ctx: &Context, public_key: &PublicKey, dim: usize) -> Self{
+        let m = mnlut.m();
         let n = mnlut.n();
         let p = ctx.full_message_modulus();
         Self {
             luts: Array::from_shape_fn(IxDyn(&vec![p; m - 1]), |indices| -> Vec<LUT> {
                 let nlwes = Vec::from_iter((0..p).map(|i| {
                     let mut idx = Vec::from_iter((0..m - 1).map(|i| indices[i]));
-                    idx.push(i);
+                    //idx.push(i);
+                    idx.insert(dim, i);
                     &mnlut.nlwes[&IxDyn(&idx)]
                 }));
 
@@ -32,6 +39,15 @@ impl PackedMNLUT {
         }
     }
 
+// rotate les lut par l'inex donné
+    pub fn blind_rotate_assign(&mut self, index: &LWE, public_key: &PublicKey, ctx: &Context){
+        for luts in self.luts.iter_mut(){
+            for lut in luts.iter_mut(){
+                public_key.blind_rotation_assign(index, lut, ctx);
+            }
+        }
+    }
+// depack les valeurs 
     pub fn to_mnlut(&self, ctx: &Context, public_key: &PublicKey) -> MNLUT {
         let m = self.m();
         let n = self.n();
@@ -59,6 +75,7 @@ impl PackedMNLUT {
     pub fn n(&self) -> usize {
         self.luts.first().map(|v| v.len()).unwrap_or(0)
     }
+   //doit encore confirmer avec felix !!!
 
     pub fn blind_tensor_access(&self, index: &NLWE, ctx: &Context, public_key: &PublicKey) -> NLWE {
         assert_eq!(index.n(), self.m());

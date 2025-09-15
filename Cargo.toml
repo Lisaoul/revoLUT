@@ -57,3 +57,8 @@ harness = false
 [[bench]]
 name = "bcs"
 harness = false
+
+[[bin]]
+name = "floyd_warshall"
+path = "src/floyd_warshall.rs"
+

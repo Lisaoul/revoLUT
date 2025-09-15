@@ -27,6 +27,7 @@ use tfhe::core_crypto::fft_impl::fft64::math::fft::FftView;
 
 use rand::Rng;
 mod blind_short_path;
+mod floyd_warshall;
 mod blind_sort;
 mod blind_topk;
 pub mod lut;
@@ -888,6 +889,7 @@ impl PublicKey {
         lwe_ciphertext_add_assign(lwe, &res);
     }
 
+
     /// Reduce the plaintext modulus in `ct` from `big_modulus` to `message_modulus`.
     pub fn lower_precision(&self, ct: &mut LWE, ctx: &Context, big_modulus: u64) {
         let small_delta = (1u64 << 63) / big_modulus;
@@ -1200,6 +1202,10 @@ impl PublicKey {
             // });
         LUT::from_vec_of_lwe(&column, &self, ctx)
     }
+
+
+
+    
 
 
     pub fn blind_matrix_add(
