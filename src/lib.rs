@@ -29,10 +29,13 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
+mod blind_short_path;
+mod matmul;
 pub mod lut;
 pub mod nlwe;
 pub mod packed_lut;
 pub mod radix;
+
 
 pub type LWE = LweCiphertext<Vec<u64>>;
 pub type GLWE = GlweCiphertext<Vec<u64>>;
